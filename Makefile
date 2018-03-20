@@ -1,7 +1,9 @@
-include ../Makefile.base
-
 NAME=ml
 VERSION=1.0.0
+IMAGE=originalgremlin/$(NAME)
+
+build:
+	docker build -t $(IMAGE) -t $(IMAGE):$(VERSION) .
 
 run:
 	docker run -it --rm --hostname $(NAME) --name $(NAME) \
