@@ -104,3 +104,4 @@ ENV/
 
 # Jupyter Notebooks
 notebooks/.ipynb_checkpoints/
+data/*/submissions/
