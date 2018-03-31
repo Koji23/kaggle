@@ -19,7 +19,7 @@ RUN set -x \
 # extras
 RUN set -x \
     && conda install pytorch-cpu spacy torchvision -c pytorch -y \
-    && conda install jupyter_contrib_nbextensions xgboost -c conda-forge -y \
+    && conda install jupyter_contrib_nbextensions tqdm xgboost -c conda-forge -y \
     && pip install --upgrade pip \
     && pip install kaggle torchtext \
     && python -m spacy download en \
