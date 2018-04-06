@@ -54,3 +54,14 @@ class CategoricalEncoder(BaseEstimator, TransformerMixin):
     def transform(self, X):
         check_is_fitted(self, 'one_hot_encoder_')
         return self.one_hot_encoder_.transform(self.label(X))
+
+
+class ConstantScaler(BaseEstimator, TransformerMixin):
+    def __init__(self, scale=1.0):
+        self.scale = scale
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        return X * self.scale
