@@ -1,0 +1,2 @@
+class DeepSuperClassifier(object):
+    pass
