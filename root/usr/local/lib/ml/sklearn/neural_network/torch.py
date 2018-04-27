@@ -1,24 +1,26 @@
-from ...torch.optim.bs_scheduler import ExponentialBS
-from ...utils import one_hot_encode, tensor
-from ...torch.optim import LearningRateFinder
+from ml.torch.optim.bs_scheduler import ExponentialBS
+from ml.torch.optim import LearningRateFinder
+from ml.utils import tensor
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.preprocessing import LabelBinarizer
+from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
+from sklearn.utils import check_random_state, resample, shuffle
+from tqdm import tqdm_notebook as tqdm
 import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn as nn
-from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
-from sklearn.utils.multiclass import unique_labels
-from sklearn.utils import check_random_state, resample, shuffle
-from tqdm import tqdm_notebook as tqdm
 
 
 class TorchClassifier(BaseEstimator, ClassifierMixin):
-    def __init__(self, network, batch_size=32, max_epochs=250, n_early_stoppage=5):
+    def __init__(self, network=nn.Sequential(), batch_size=32, max_batch_size=1024, n_iter=250, n_patience=5, random_state=None):
         self.network = network
         self.batch_size = batch_size
-        self.max_epochs = max_epochs
-        self.n_early_stoppage = n_early_stoppage
+        self.max_batch_size = max_batch_size
+        self.n_iter = n_iter
+        self.n_patience = n_patience
+        self.random_state = random_state
 
-    def fit(self, X, y, X_validation=None, y_validation=None, random_state=None):
+    def fit(self, X, y, X_validation, y_validation):
         """
         Parameters
         ----------
@@ -31,20 +33,10 @@ class TorchClassifier(BaseEstimator, ClassifierMixin):
         self : object
             Returns self.
         """
-        # check that X and y have correct shape
+        # input validation
         X, y = check_X_y(X, y)
-        random_state = check_random_state(random_state)
-        self.X_ = X
-        self.y_ = y
-        self.classes_ = unique_labels(y)
-        n_classes = len(self.classes_)
-
-
-        # check validation shape
-        if X_validation is None or y_validation is None:
-            X_validation, y_validation = resample(X, y, n_samples=1000, random_state=random_state)
         X_validation, y_validation = check_X_y(X_validation, y_validation)
-        X_validation, y_validation = tensor(X_validation), tensor(one_hot_encode(y_validation, n_classes))
+        random_state = check_random_state(self.random_state)
 
         # store training and validation losses at every epoch
         self.training_loss_ = []
@@ -53,21 +45,30 @@ class TorchClassifier(BaseEstimator, ClassifierMixin):
         self.state_min_ = None
 
         # set model hyperparameters
-        self.network.train()
-        self.learning_rate = LearningRateFinder(self.network).fit(X, y, batch_size=self.batch_size, random_state=random_state)
+        self.learning_rate_ = LearningRateFinder(self.network.train(), random_state=random_state).fit(X, y, batch_size=self.batch_size)
         loss_fn = nn.MSELoss(size_average=False)
-        bs_scheduler = ExponentialBS(self.batch_size, max_bs=1024, gamma=2, T=4)
-        lr_scheduler = self.learning_rate.scheduler(gamma=0.90)
+        bs_scheduler = ExponentialBS(self.batch_size, max_bs=self.max_batch_size, gamma=2, T=4)
+        lr_scheduler = self.learning_rate_.scheduler(gamma=0.90)
         optimizer = lr_scheduler.optimizer
 
-        for epoch in tqdm(range(self.max_epochs), desc='Epoch'):
+        # convert class names to one-hot encoded integer values
+        self.label_binarizer_ = LabelBinarizer().fit(y)
+        y = self.label_binarizer_.transform(y)
+        y_validation = self.label_binarizer_.transform(y_validation)
+
+        # convert inputs to torch tensors
+        X_validation = tensor(X_validation)
+        y_validation = tensor(y_validation)
+
+        for epoch in tqdm(range(self.n_iter), desc='Epoch'):
+            self.network.train()
             X, y = shuffle(X, y, random_state=random_state)
             epoch_training_loss = 0.0
             batch_size = bs_scheduler.get_bs()
 
             for i in range(0, X.shape[0], batch_size):
                 batch_x = tensor(X[i:i+self.batch_size], True)
-                batch_y = tensor(one_hot_encode(y[i:i+self.batch_size], n_classes))
+                batch_y = tensor(y[i:i+self.batch_size])
                 loss = loss_fn(self.network(batch_x), batch_y)
                 epoch_training_loss += loss.data[0]
                 optimizer.zero_grad()
@@ -83,19 +84,17 @@ class TorchClassifier(BaseEstimator, ClassifierMixin):
             epoch_validation_loss = loss_fn(self.network(X_validation), y_validation).data[0]
             self.validation_loss_.append(epoch_validation_loss / X_validation.shape[0])
             self.index_min_ = np.argmin(self.validation_loss_)
-            self.network.train()
 
             # save the best model seen
             if self.index_min_ == len(self.validation_loss_) - 1:
                 self.state_min_ = self.network.state_dict()
 
-            # stop early if validation loss is higher than minimum loss for n_early_stoppage epochs in a row
-            if self.index_min_ < len(self.validation_loss_) - self.n_early_stoppage:
+            # stop early if validation loss is higher than minimum loss for n_patience epochs in a row
+            if self.index_min_ < len(self.validation_loss_) - self.n_patience:
                 break
 
             bs_scheduler.step()
             lr_scheduler.step()
-
 
         # return the best model seen
         self.network.load_state_dict(self.state_min_)
@@ -112,14 +111,8 @@ class TorchClassifier(BaseEstimator, ClassifierMixin):
         y : array of int of shape = [n_samples]
             The label for each sample is the label of the class with highest predicted probability.
         """
-        # input validation
-        check_is_fitted(self, ['X_', 'y_'])
-        X = check_array(X)
-
-        # return labels of predicted classes
-        self.network.eval()
-        values, predictions = self.network(tensor(X)).max(1)
-        return predictions.data.numpy()
+        predictions = self.predict_proba(X)
+        return self.label_binarizer_.inverse_transform(predictions)
 
     def predict_proba(self, X):
         """Return probability estimates for the test data X.
@@ -133,8 +126,9 @@ class TorchClassifier(BaseEstimator, ClassifierMixin):
             The class probabilities of the input samples. Classes are ordered by lexicographic order.
         """
         # input validation
-        check_is_fitted(self, ['X_', 'y_'])
+        check_is_fitted(self, ['label_binarizer_'])
         X = tensor(check_array(X))
+        self.network.eval()
 
         # are predictions already probabilities?
         modules = list(self.network.modules())
