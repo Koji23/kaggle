@@ -23,20 +23,21 @@ class LearningRateFinder(object):
     .. _Cyclical Learning Rates for Training Neural Networks:
         http://arxiv.org/abs/1506.01186
     """
-    def __init__(self, model, loss_fn=nn.MSELoss(), optimizer_class=torch.optim.Adam, optimizer_kwargs={}, random_state=None):
+    def __init__(self, model, n_iter=301, loss_fn=nn.MSELoss(), optimizer_class=torch.optim.Adam, optimizer_kwargs={}, random_state=None):
         self.model = model
+        self.n_iter = n_iter
         self.loss_fn = loss_fn
         self.optimizer_class = optimizer_class
         self.optimizer_kwargs = optimizer_kwargs
         self.random_state = random_state
 
-    def fit(self, X, y, batch_size=64, min_lr=-5, max_lr=0, n_lr=301, smoothing=5):
+    def fit(self, X, y, batch_size=64, min_lr=-5, max_lr=0, smoothing=5):
         # input validation
         X, y = check_X_y(X, y)
         random_state = check_random_state(self.random_state)
 
         # set model hyperparameters
-        self.learning_rates_ = np.logspace(min_lr, max_lr, num=n_lr)
+        self.learning_rates_ = np.logspace(min_lr, max_lr, num=self.n_iter)
         self.losses_ = []
         model = copy.deepcopy(self.model)
         optimizer = self.optimizer_class(model.parameters(), lr=0, **self.optimizer_kwargs)

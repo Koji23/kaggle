@@ -1,1 +1,1 @@
-from shape import Reshape
+from .shape import Reshape
